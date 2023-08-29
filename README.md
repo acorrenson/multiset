@@ -1,9 +1,12 @@
 # multiset
 
-This repository contains a tiny proof that the multiset extension of a well founded relation is well founded.
-Such a result is extremely useful to prove termination of complex algorithms.
-While this proof can be found in multiple large projects, our proof is just two hundred lines of pure Coq and can be used without having to load any dependencies.
+This repository contains a tiny proof that the multiset extension of a wellfounded relation is well founded.
+This result is essential to prove the termination of some algorithms.
+While many formal proofs of this result exist, ours is less than two hundred
+lines of pure Coq and does not rely on any dependencies.
 
-## Ressources
+## References
 
-Our proof closely follows the one of the paper [Coq formalization of the higher-order recursive path ordering](https://rdcu.be/c96SY)
+1. [Coq formalization of the higher-order recursive path ordering](https://rdcu.be/c96SY)
+2. [An Inductive Proof of the Wellfoundedness of the Multiset Order](https://www21.in.tum.de/~nipkow/Misc/multiset.ps)
+

@@ -2,165 +2,121 @@ From Coq Require Import Sorting.Permutation List.
 From Coq Require Import Classes.Morphisms.
 Import ListNotations.
 
-Class Dec (A : Type) :=
-  eq_dec : forall (x y : A), { x = y } + { x <> y }.
-Infix "=?" := eq_dec (at level 80).
+(** * A minimalist and self contained formalization of multiset ordering *)
 
-Definition Multiset (A : Type) : Type :=
-  list A.
+Section MSO.
 
-Definition equ {A} (M1 M2 : Multiset A) :=
-  Permutation M1 M2.
-Infix "≡" := equ (at level 80).
+(** ** Definitions *)
 
-Goal [1] ≡ [1].
-  repeat constructor.
-Qed.
+(** We start with a base type [A] equiped with a binary relation [lt] *)
+Context {A : Type} {lt : A -> A -> Prop}.
 
-Fixpoint count {A} `{Dec A} (a : A) (M : Multiset A) :=
-  match M with
-  | [] => 0
-  | x::M =>
-    if x =? a then 1 + count a M else count a M
-  end.
+(** We suppose that [A] has a decidable equality *)
+Context {eq_dec : forall (x y : A), { x = y } + { x <> y }}.
 
-Definition empty {A} : Multiset A := [].
+Definition equ (L1 L2 : list A) :=
+  Permutation L1 L2.
+Infix "≡" := (Permutation) (at level 80).
+Infix "=?" := (eq_dec) (at level 80).
 
-Definition union {A} (M1 M2 : Multiset A) := M1 ++ M2.
+(** We extend [lt] to a binary relation on lists
+    Intuitively [lt_ext1 L1 L2] iff L1 is obtained 
+    from L2 by removing an element and
+    replacing it by a list of smaller ones
+*)
+Inductive lt_ext1 (L1 L2 : list A) : Prop :=
+  | lt_ext1_intro x X Y :
+    L1 ≡ Y ++ X ->
+    L2 ≡ x::X ->
+    (forall y, In y Y -> lt y x) ->
+    lt_ext1 L1 L2.
 
-Definition singleton {A} (a : A) : Multiset A := [a].
-
-Inductive GtExt1 {A} (gt : A -> A -> Prop) (M1 M2 : Multiset A) : Prop :=
-  | ext1_intro (X Y : Multiset A) (a : A):
-    M1 ≡ a::X ->
-    M2 ≡ Y ++ X ->
-    (forall y, In y Y -> gt a y) ->
-    GtExt1 gt M1 M2.
-
-Definition remove_all {A} `{Dec A} (a : A) (M : Multiset A) :=
-  remove eq_dec a M.
-
-Fixpoint remove_one {A} `{Dec A} (a : A) (M : Multiset A) :=
-  match M with
+(** Removing one occurence of [x] in [L] *)
+Fixpoint remove (L : list A) (x : A) :=
+  match L with
   | [] => []
-  | x::M =>
-    if a =? x then M else x::remove_one a M
+  | y::L =>
+    if x =? y then L else y::remove L x
   end.
 
-Definition remove_one_eq {A} `{DEC : Dec A} :
-  forall (a : A) (M1 M2 : Multiset A),
-    M1 ≡ M2 -> remove_one a M1 ≡ remove_one a M2.
+(** [remove] is compatible with permutations *)
+#[global]
+Instance remove_morphism: Proper (equ ==> eq ==> equ) remove.
 Proof.
-  intros.
-  induction H; simpl.
+  intros L1 L2 Heq a ? <-.
+  induction Heq; simpl.
   - reflexivity.
-  - destruct (a =? x) as [->|Hneq]; auto.
-    now rewrite IHPermutation.
-  - destruct (a =? y) as [->|Hneq1].
-    destruct (y =? x) as [->|Hneq1]; try easy.
-    destruct (a =? x) as [->|Hneq2]; try easy.
+  - destruct (eq_dec a x) as [->|Hne]; auto.
+    now rewrite IHHeq.
+  - destruct (eq_dec a x) as [->|Hne1].
+    destruct (eq_dec x y) as [->|Hne2]; try easy.
+    destruct (eq_dec a y) as [->|Hne2]; try easy.
     constructor.
-  - now rewrite IHPermutation1, IHPermutation2.
+  - now rewrite IHHeq1, IHHeq2.
 Qed.
 
-Definition remove_all_eq {A} `{DEC : Dec A} :
-  forall (a : A) (M1 M2 : Multiset A),
-    M1 ≡ M2 -> remove_all a M1 ≡ remove_all a M2.
+Lemma remove_head:
+  forall a L, L ≡ remove (a::L) a.
 Proof.
-  intros.
-  induction H.
-  - constructor.
-  - simpl. destruct (a =? x) as [->|Hneq]; auto.
-    apply Permutation_cons; auto.
-  - simpl. destruct (a =? x) as [->|Hneq].
-    + destruct (x =? y) as [->|Hneq]; reflexivity.
-    + destruct (a =? y) as [->|Hneq']. reflexivity.
-      constructor.
-  - now rewrite IHPermutation1, IHPermutation2.
+  intros; simpl.
+  now destruct (eq_dec a a).
 Qed.
 
-Definition rem_cons_eq {A} `{DEC : Dec A} :
-  forall (a : A) (M1 M2 : Multiset A),
-    M1 ≡ a::M2 -> remove_one a M1 ≡ M2.
+(** ** Proof that [lt_ext1] is well founded *)
+
+Theorem lt_ext1_inv:
+  forall L1 L2 a,
+    lt_ext1 L1 (a::L2) ->
+    exists X,
+      (L1 ≡ a::X /\ lt_ext1 X L2) \/
+      (L1 ≡ X ++ L2 /\ forall x, In x X -> lt x a).
 Proof.
-  intros.
-  rewrite remove_one_eq; eauto.
-  simpl. now destruct (a =? a) as [Heq|Hneq].
+  intros L1 L2 a H.
+  inversion H as [b X Y HXY Heq HY].
+  destruct (eq_dec a b) as [->|Hne].
+  - apply Permutation_cons_inv in Heq.
+    exists Y. right. now rewrite Heq.
+  - pose proof (Heq' := remove_morphism _ _ Heq b b eq_refl).
+    simpl in Heq'.
+    destruct (eq_dec b b) as [_|]; try easy.
+    destruct (eq_dec b a) as [->|_]; try easy.
+    rewrite <- Heq' in HXY.
+    exists (Y ++ remove L2 b).
+    left. split.
+  + rewrite HXY.
+    fold ([a] ++ remove L2 b).
+    fold ([a] ++ (Y ++ remove L2 b)).
+    apply Permutation_app_swap_app.
+  + econstructor; eauto.
+    rewrite <- Heq' in Heq.
+    eapply Permutation_cons_inv.
+    rewrite Heq. econstructor.
 Qed.
-
-Lemma GtExt1_inv {A} `{DEC : Dec A}:
-  forall gt (M1 M2 : Multiset A) (a : A),
-    GtExt1 gt (a::M1) M2 ->
-    exists M',
-      (M2 ≡ a::M' /\ GtExt1 gt M1 M') \/
-      (M2 ≡ M' ++ M1 /\ forall x, In x M' -> gt a x).
-Proof.
-  intros.
-  inversion H as [X Y b H1 H2 H3].
-  destruct (a =? b) as [->|Hneq].
-  - apply Permutation_cons_inv in H1.
-    exists Y. right. split; auto.
-    now rewrite H1.
-  - pose proof (H4 := rem_cons_eq _ _ _ H1).
-    simpl in H4. destruct (b =? a) as [->|_]; try easy.
-    rewrite <- H4 in H2.
-    exists (Y ++ remove_one b M1). left.
-    split.
-    + rewrite H2.
-      fold ([a] ++ remove_one b M1).
-      fold ([a] ++ (Y ++ remove_one b M1)).
-      apply Permutation_app_swap_app.
-    + eapply (ext1_intro _ _ _ _ _ b).
-      symmetry in H1. apply rem_cons_eq in H1.
-      rewrite <- H1. simpl.
-      destruct (a =? b) as [->|_]; try easy.
-      symmetry in H4. apply rem_cons_eq in H4.
-      now rewrite H4.
-      auto.
-Qed.
-
-Definition LtExt1 {A} `{DEC : Dec A} gt (M1 M2 : Multiset A) :=
-  GtExt1 gt M2 M1.
 
 #[global]
-Instance GtMorphism {A} `{DEC : Dec A} {gt : A -> A -> Prop} :
-  Proper (equ ==> equ ==> iff) (LtExt1 gt).
+Instance lt_ext1_morphism:
+  Proper (equ ==> equ ==> iff) lt_ext1.
 Proof.
   intros X1 X2 HX Y1 Y2 HY. split.
-  - intros H. unfold LtExt1 in *.
-    inversion H. econstructor.
-    rewrite <- HY. apply H0.
-    rewrite <- HX. apply H1.
+  - intros H. inversion H. econstructor.
+    rewrite <- HX. apply H0.
+    rewrite <- HY. apply H1.
     auto.
-  - intros H. unfold LtExt1 in *.
-    inversion H. econstructor.
-    rewrite HY. apply H0.
-    rewrite HX. apply H1.
+  - intros H. inversion H. econstructor.
+    rewrite HX. apply H0.
+    rewrite HY. apply H1.
     auto.
 Qed.
 
-#[global]
-Instance AccMorphism {A} `{DEC : Dec A} {gt : A -> A -> Prop} :
-  Proper (equ ==> iff) (Acc (LtExt1 gt)).
+Lemma helper_1:
+  forall (L1 : list A) (a : A),
+    (forall b L2, lt b a -> Acc lt_ext1 L2 -> Acc lt_ext1 (b::L2)) ->
+    (forall L2, lt_ext1 L2 L1 -> Acc lt_ext1 (a::L2)) ->
+    Acc lt_ext1 L1 ->
+    Acc lt_ext1 (a::L1).
 Proof.
-  intros X Y H. split.
-  - intros Hacc. constructor.
-    intros Z HZ. inversion Hacc as [Hacc'].
-    apply Hacc'. now rewrite H.
-  - intros Hacc. constructor.
-    intros Z HZ. inversion Hacc as [Hacc'].
-    apply Hacc'. now rewrite <- H.
-Qed.
-
-Lemma LtExt1_Acc_cons {A} `{DEC : Dec A} :
-  forall gt (M0 : Multiset A) (a : A),
-    Acc (LtExt1 gt) M0 ->
-    (forall b M, gt a b -> Acc (LtExt1 gt) M -> Acc (LtExt1 gt) (b::M)) ->
-    (forall M, LtExt1 gt M M0 -> Acc (LtExt1 gt) (a::M)) ->
-    Acc (LtExt1 gt) (a::M0).
-Proof.
-  intros * Hacc H1 H2.
-  constructor. intros N [M' [HN1 | HN2]]%GtExt1_inv.
+  intros * H1 H2 Hacc.
+  constructor. intros N [M' [HN1 | HN2]]%lt_ext1_inv.
   - destruct HN1 as [H3 H4].
     rewrite H3. apply H2, H4.
   - destruct HN2 as [H3 H4].
@@ -168,37 +124,36 @@ Proof.
     induction M'; simpl in *; auto.
 Qed.
 
-Lemma lemma_14 {A} `{DEC : Dec A} :
-  forall (gt : A -> A -> Prop) (a : A),
-    (forall (b : A) (M : Multiset A), gt a b -> Acc (LtExt1 gt) M -> Acc (LtExt1 gt) (b::M)) ->
-    forall M, Acc (LtExt1 gt) M -> Acc (LtExt1 gt) (a::M).
+Lemma helper_2:
+  forall a,
+    (forall (b : A) (M : list A), lt b a -> Acc lt_ext1 M -> Acc lt_ext1 (b::M)) ->
+    forall M, Acc lt_ext1 M -> Acc lt_ext1 (a::M).
 Proof.
   intros * H M HM.
   induction HM as [M' H1 H2].
-  apply LtExt1_Acc_cons; auto.
+  apply helper_1; auto.
   now constructor.
 Qed.
 
-Lemma lemma_15 {A} `{DEC : Dec A} :
-  forall (gt : A -> A -> Prop) (a : A),
-    Acc (fun x y => gt y x) a ->
-    forall (M : Multiset A), Acc (LtExt1 gt) M -> Acc (LtExt1 gt) (a::M).
+Lemma helper_3:
+  forall (a : A) (M : list A),
+    Acc lt a -> Acc lt_ext1 M -> Acc lt_ext1 (a::M).
 Proof.
-  intros gt a Ha.
-  induction Ha as [b H1 H2].
-  intros M HM.
-  apply lemma_14; auto.
+  intros a M Ha.
+  induction Ha as [b H1 H2] in M |-*.
+  intros HM. apply helper_2; auto.
 Qed.
 
-Lemma lemma_16 {A} `{DEC : Dec A} :
-  forall (gt : A -> A -> Prop),
-    well_founded (fun x y => gt y x) ->
-    well_founded (LtExt1 gt).
+Lemma well_founded_lt_ext1:
+    well_founded lt ->
+    well_founded lt_ext1.
 Proof.
   intros * Hwf M.
   induction M.
   - constructor. intros M' Hl.
     inversion Hl as [X Y a H1 H2 H3].
-    now apply Permutation_nil_cons in H1.
-  - apply lemma_15; auto.
+    now apply Permutation_nil_cons in H2.
+  - apply helper_3; auto.
 Qed.
+
+End MSO.
